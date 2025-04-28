@@ -1,0 +1,125 @@
+plugins {
+    id("com.android.application")
+    kotlin("android")
+}
+
+android {
+    namespace = "com.yourorg.coreclient"
+    compileSdk = 33
+
+    defaultConfig {
+        applicationId = "com.yourorg.coreclient"
+        minSdk = 21
+        targetSdk = 33
+        versionCode = 1
+        versionName = "1.0"
+    }
+    buildFeatures { compose = true }
+    composeOptions { kotlinCompilerExtensionVersion = "1.5.0" }
+}
+
+dependencies {
+    implementation("androidx.activity:activity-compose:1.8.0")
+    implementation("androidx.compose.ui:ui:1.5.0")
+    implementation("com.squareup.okhttp3:okhttp:4.11.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.1")
+    implementation("org.json:json:20230227")
+}
+
+
+package com.yourorg.coreclient
+
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.*
+import okhttp3.*
+import org.json.JSONObject
+import java.io.IOException
+
+class MainActivity : ComponentActivity() {
+  private val client = OkHttpClient()
+  private val graphqlUrl = "https://api.yourdomain.com/graphql"
+
+  override fun onCreate(savedInstanceState: Bundle?) {
+    super.onCreate(savedInstanceState)
+    setContent { TenantListScreen() }
+  }
+
+  @Composable
+  fun TenantListScreen() {
+    var tenants by remember { mutableStateOf(listOf<String>()) }
+    var loading by remember { mutableStateOf(true) }
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(Unit) {
+      scope.launch { fetchTenants { list ->
+        tenants = list; loading = false
+      } }
+    }
+
+    Surface(modifier = Modifier.fillMaxSize()) {
+      if (loading) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+          CircularProgressIndicator()
+        }
+      } else {
+        Column(Modifier.padding(16.dp)) {
+          Text("Tenants", style = MaterialTheme.typography.titleLarge)
+          Spacer(Modifier.height(8.dp))
+          tenants.forEach { name ->
+            Text("• $name", style = MaterialTheme.typography.bodyLarge)
+          }
+        }
+      }
+    }
+  }
+
+  private suspend fun fetchTenants(onResult: (List<String>) -> Unit) {
+    withContext(Dispatchers.IO) {
+      val json = JSONObject()
+        .put("query", "{ tenants { name } }")
+        .toString()
+      val req = Request.Builder()
+        .url(graphqlUrl)
+        .post(RequestBody.create("application/json".toMediaType(), json))
+        .build()
+
+      client.newCall(req).enqueue(object : Callback {
+        override fun onFailure(call: Call, e: IOException) {
+          onResult(emptyList())
+        }
+        override fun onResponse(call: Call, resp: Response) {
+          resp.body?.string()?.let { body ->
+            val data = JSONObject(body).getJSONObject("data")
+            val arr = data.getJSONArray("tenants")
+            val list = (0 until arr.length()).map {
+              arr.getJSONObject(it).getString("name")
+            }
+            onResult(list)
+          } ?: onResult(emptyList())
+        }
+      })
+    }
+  }
+}
+
+
+<manifest ... >
+  <uses-permission android:name="android.permission.INTERNET" />
+  <application
+    android:label="CoreClient"
+    android:theme="@style/Theme.Material3.DayNight.NoActionBar">
+    <activity android:name=".MainActivity">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity>
+  </application>
+</manifest>
